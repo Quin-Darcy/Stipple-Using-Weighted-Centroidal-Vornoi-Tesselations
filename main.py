@@ -1,3 +1,12 @@
+#=================================================================================#
+#   AUTHOR: Quin Darcy
+#   PROJECT: Stipple Generator
+#   DATE: 07-02-2021
+#   Description: This program takes a given image, applies a greyscale filter
+#       to it, follows by a halftoner. After this, we use the (?) method along with
+#       Lloyd-Relaxation to obtain a weighted centroidal Vornoi Diagram, whose
+#       generators are the stipple points.
+#=================================================================================#
 import numpy as np
 from numpy import linalg as la
 import math
@@ -7,27 +16,41 @@ import random
 from PIL import Image
 import itertools
 from itertools import groupby
+from itertools import product
+import scipy
+import gc
+import my_class as mc
+from scipy.spatial.distance import cdist
 
+#=================================================================================#
+#                                  CONSTANTS                                      #
+#=================================================================================#                                 
 EPSILON = 0.05
-
+#=================================================================================#
+#                                  GREYSCALER                                     #
+#=================================================================================#
 def get_grey(pixel):
-    theta = abs(math.pi / 4 - math.atan(pixel[1] / (pixel[0] + 0.0000000001)))
+    try:
+        theta = abs(math.pi / 4 - math.atan(pixel[1] / pixel[0]))
+    except ZeroDivisionError:
+        theta = math.pi / 2
     C = math.sqrt(math.pow(pixel[0], 2)+math.pow(pixel[1], 2)) * math.cos(theta) / math.sqrt(2)
     C = math.floor(C)
     return tuple([C, C, C])
 
 def greyscale():
-    img = Image.open('face.jpg')
+    img = Image.open('head.jpg')
     px = img.load()
     sz = img.size
 
-    for i in range(sz[0]):
-        for j in range(sz[1]):
-            px[i, j] = get_grey(px[i, j])
+    for i, j in product(range(sz[0]), range(sz[1])):
+        px[i, j] = get_grey(px[i, j])
     img.save('greyscale_result.jpg')
     img.close()
     return sz
-
+#=================================================================================#
+#                                   HALFTONER                                     #
+#=================================================================================#                               
 def halftone(num):
     img = Image.open('greyscale_result.jpg')
     px = img.load()
@@ -40,82 +63,54 @@ def halftone(num):
     C4 = 0
     err = 0
 
-    '''
-    for i in range(sz[0]):
-        for j in range(sz[1]):
-            if (px[i, j][0] > random.randint(74, 201)):
-                px[i, j] = (255,255,255)
-            else:
-                px[i, j] = (0,0,0)
-    '''
-
-    for i in range(1, sz[0] - 1):
-        for j in range(1, sz[1]):
-            if (px[i, j][0] > random.randint(64, 191)):
-                K = 255
-            else:
-                K = 0
-            # Floyd-Steinberg error diffusion
-            C0 = px[i, j][0]
-            err = C0 - K
-            C1 = px[i+1, j][0]
-            temp = math.floor(C1+7*err/16)
-            px[i+1, j] = tuple([temp, temp, temp])
-            C2 = px[i-1, j-1][0]
-            temp = math.floor(C2+3*err/16)
-            px[i-1, j-1] = tuple([temp, temp, temp])
-            C3 = px[i, j-1][0]
-            temp = math.floor(C3+5*err/16)
-            px[i, j-1] = tuple([temp, temp, temp])
-            C4 = px[i+1, j-1][0]
-            temp = math.floor(C4+err/16)
-            px[i+1, j-1] = tuple([temp, temp, temp])
-            px[i, j] = tuple([K, K, K])     
-
-
+    for i, j in product(range(sz[0]), range(sz[1])):
+        if (px[i, j][0] > random.randint(44, 191)):
+            px[i, j] = (255,255,255)
+        else:
+            px[i, j] = (0,0,0)
+    
     img.save('stipple/stipple_'+str(num)+'.jpg')
     img.close()
-
+#=================================================================================#
+#                                GENERATORS                                       #
+#=================================================================================#
 def get_sites():
     img = Image.open('stipple/stipple_0.jpg')
     px = img.load()
     sz = img.size
     sites = []
 
-    for i in range(sz[0]):
-        for j in range(sz[1]):
-            if (px[i, j][0] == 0):
-                sites.append([i, j])
+    for i, j in product(range(sz[0]), range(sz[1])):
+        if (px[i, j][0] == 0):
+            sites.append([i, j])
+
     img.close()
-    return sites
-
-def get_dist(a, b, c, d):
-    return math.sqrt(math.pow(a-c, 2) + math.pow(b-d, 2))
-
-def get_index(a, b, sites):
-    dists = []
+    return np.array(sites)
+#=================================================================================#
+#                                 REGIONS                                         #
+#=================================================================================#
+def gen(m, n, sites):
+    arr = [[0 for i in range(m)] for j in range(n)]
     for i in range(len(sites)):
-        dists.append(get_dist(a, b, sites[i][0], sites[i][1]))
-    MIN = min(dists)
-    for i in range(len(dists)):
-        if (MIN == dists[i]):
-            return i
+        arr[sites[i][1]][sites[i][0]] = i + 1
+    return np.array(arr)
 
-def get_regions(num, sites):
-    L = len(sites)
-    img = Image.open('stipple/stipple_'+str(num)+'.jpg')
-    px = img.load()
-    sz = img.size
-    regions = [[] for i in range(L)]
-
-    for i in range(sz[0]):
-        for j in range(sz[1]):
-            k = get_index(i, j, sites)
-            regions[k].append([i, j])
-
-    img.close()
-    return regions
-
+def get_regions(num, sites, sz):
+    m = sz[0]
+    n = sz[1]
+    regions = [[] for i in range(len(sites))]
+    arr = gen(m, n, sites)
+    root = mc.Node(arr, sites, [[0,0], [m-1,0], [0,n-1], [m-1,n-1]], 0, 1)
+    root.div_conq()
+    for i, j in product(range(m), range(n)):
+        regions[root.arr[j][i] - 1].append([i, j]) 
+    #del arr
+    root.delete()
+    gc.collect()
+    return regions, arr
+#=================================================================================#
+#                                 CENTROIDS                                       #
+#=================================================================================#
 def get_center(reg, num):
     img = Image.open('stipple/stipple_'+str(num)+'.jpg')
     px = img.load()
@@ -156,15 +151,13 @@ def get_centroids(regions, num):
         C.append(get_center(regions[i], num))
 
     return C
-
+#=================================================================================#
+#                                     IMAGE                                       #
+#=================================================================================#
 def make_img(cent, num, sz):
     L = len(cent)
     img = Image.new('RGB', sz, color=(255, 255, 255))
     px = img.load()
-
-    for i in range(sz[0]):
-        for j in range(sz[1]):
-            px[i, j] = (255,255,255)
 
     for i in range(L):
         x = cent[i][0]
@@ -173,15 +166,47 @@ def make_img(cent, num, sz):
 
     img.save('stipple/stipple_'+str(num+1)+'.jpg')
     img.close()
-
+#=================================================================================#
+#                                    THRESHOLD                                    #
+#=================================================================================#
 def get_avg_dist(cent, sites):
     L = len(cent)
-    dist = []
     sum = 0
     for i in range(L):
-        sum += get_dist(cent[i][0], cent[i][1], sites[i][0], sites[i][1])
+        a = np.array([cent[i][0], cent[i][1]])
+        b = np.array([sites[i][0], sites[i][1]])
+        sum += la.norm(a-b)
     return sum / L
+#=================================================================================#
+#                                    VORONOI                                      #
+#=================================================================================#
+def start(sites, sz, num):
+    # INITIAL VORONOI TESSELATION
+    print('GENERATING VORONOI TESSELATION #'+str(num+1)+' ... ')
+    regions, arr = get_regions(num, sites, sz)
 
+    # CALCULATE WEIGHTED CENTROIDS
+    print('CALCULATING WEIGHTED CENTROIDS ... ')
+    centroids = get_centroids(regions, num)
+
+    # SET SITES TO CENTROIDS 
+    print('GENERATING IMAGE BASED ON CENTROIDS ... ')
+    make_img(centroids, num, sz)
+
+    # CALCULATE SITE-TO-CENTROID DISTANCES
+    print('CALCULATING SITE-TO-CENTROID DISTANCES ... ')
+    avg = get_avg_dist(centroids, sites)
+    print('AVERAGE DISTANCE: ', '{:.2f}'.format(avg))
+    sites = centroids
+    del centroids
+    gc.collect()
+    sites.sort()
+    sites = list(sites for sites,_ in itertools.groupby(sites))
+
+    return sites
+#=================================================================================#
+#                                     MAIN                                        #
+#=================================================================================#
 def main():
     num = 0
     avg = EPSILON + 1
@@ -194,29 +219,13 @@ def main():
     halftone(num)
     sites = get_sites()
 
-    while (avg > EPSILON):
-        # INITIAL VORNOI TESSELATION
-        print('GENERATING VORNOI TESSELATION #'+str(num)+' ... ')
-        regions = get_regions(num, sites)
-
-        # CALCULATE WEIGHTED CENTROIDS
-        print('CALCULATING WEIGHTED CENTROIDS ... ')
-        centroids = get_centroids(regions, num)
-
-        # SET SITES TO CENTROIDS 
-        print('GENERATING IMAGE BASED ON CENTROIDS ... ')
-        make_img(centroids, num, sz)
-
-        # CALCULATE SITE-TO-CENTROID DISTANCES
-        print('CALCULATING SITE-TO-CENTROID DISTANCES ... ')
-        avg = get_avg_dist(centroids, sites)
-        print('AVERAGE DISTANCE: ', '{:.2f}'.format(avg))
-        sites = centroids
-        sites.sort()
-        sites = list(sites for sites,_ in itertools.groupby(sites))
+    for i in range(15):
+        sites = start(sites, sz, num)
         num += 1
 
 
 
 if __name__=='__main__':
     main()
+
+
