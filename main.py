@@ -3,9 +3,9 @@
 #   PROJECT: Stipple Generator
 #   DATE: 07-02-2021
 #   Description: This program takes a given image, applies a greyscale filter
-#       to it, follows by a halftoner. After this, we use the (?) method along with
-#       Lloyd-Relaxation to obtain a weighted centroidal Vornoi Diagram, whose
-#       generators are the stipple points.
+#       to it, followed by a halftoner. After this, we use the Divide and Conquer 
+#       method along with Lloyd-Relaxation to obtain a weighted centroidal Vornoi 
+#       Diagram, whose generators are the stipple points.
 #=================================================================================#
 import numpy as np
 from numpy import linalg as la
